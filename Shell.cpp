@@ -1,19 +1,4 @@
-/*
- * Copyright (C) 2016 Google, Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
+#pragma once
 #include <cassert>
 #include <array>
 #include <iostream>
@@ -22,11 +7,44 @@
 #include <set>
 #include "Helpers.h"
 #include "Shell.h"
-#include "Game.h"
+#include "vkapplication.h"
 
-Shell::Shell(Game &game)
-    : game_(game), settings_(game.settings()), ctx_(),
-      game_tick_(1.0f / settings_.ticks_per_second), game_time_(game_tick_)
+
+int Shell::CreateDebugReportCallbackEXT(VkInstance                          instance,
+                                  const VkDebugReportCallbackCreateInfoEXT* pCreateInfo,
+                                  const VkAllocationCallbacks*              pAllocator,
+                                  VkDebugReportCallbackEXT*                 pCallback)
+{
+    auto func = (PFN_vkCreateDebugReportCallbackEXT)
+            vkGetInstanceProcAddr(instance,
+                                  "vkCreateDebugReportCallbackEXT");
+    if (func != nullptr)
+    {
+        return func(instance, pCreateInfo, pAllocator, pCallback);
+    }
+    else
+    {
+        return VK_ERROR_EXTENSION_NOT_PRESENT;
+    }
+}
+
+void Shell::DestroyDebugReportCallbackEXT (VkInstance               instance,
+                                    VkDebugReportCallbackEXT        callback,
+                                    const VkAllocationCallbacks*    pAllocator)
+{
+    auto func = (PFN_vkDestroyDebugReportCallbackEXT)
+            vkGetInstanceProcAddr(instance,
+                                  "vkDestroyDebugReportCallbackEXT");
+    if (func != nullptr)
+    {
+        func(instance, callback, pAllocator);
+    }
+}
+
+
+Shell::Shell(Application &application)
+    : application_(application), settings_(application.settings()), ctx_(),
+      app_tick_(1.0f / settings_.ticks_per_second), app_time_(app_tick_)
 {
     // require generic WSI extensions
     instance_extensions_.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
@@ -47,10 +65,10 @@ void Shell::log(LogPriority priority, const char *msg) const
 
 void Shell::init_vk()
 {
-    vk::init_dispatch_table_top(load_vk());
+    //init_dispatch_table_top(load_vk());
 
     init_instance();
-    vk::init_dispatch_table_middle(ctx_.instance, false);
+    //init_dispatch_table_middle(ctx_.instance, false);
 
     init_debug_report();
     init_physical_dev();
@@ -58,10 +76,11 @@ void Shell::init_vk()
 
 void Shell::cleanup_vk()
 {
+/////////////////////////////////////////////////////////////////////////////////////////////////
     if (settings_.validate)
-        vk::DestroyDebugReportCallbackEXT(ctx_.instance, ctx_.debug_report, nullptr);
-
-    vk::DestroyInstance(ctx_.instance, nullptr);
+        DestroyDebugReportCallbackEXT(ctx_.instance, ctx_.debug_report, nullptr);
+/////////////////////////////////////////////////////////////////////////////////////////////////
+    vkDestroyInstance(ctx_.instance, nullptr);
 }
 
 bool Shell::debug_report_callback(VkDebugReportFlagsEXT flags,
@@ -94,7 +113,7 @@ void Shell::assert_all_instance_layers() const
 {
     // enumerate instance layer
     std::vector<VkLayerProperties> layers;
-    vk::enumerate(layers);
+    enumerate(layers);
 
     std::set<std::string> layer_names;
     for (const auto &layer : layers)
@@ -114,14 +133,14 @@ void Shell::assert_all_instance_extensions() const
 {
     // enumerate instance extensions
     std::vector<VkExtensionProperties> exts;
-    vk::enumerate(nullptr, exts);
+    enumerate(nullptr, exts);
 
     std::set<std::string> ext_names;
     for (const auto &ext : exts)
         ext_names.insert(ext.extensionName);
 
     for (auto &layer : instance_layers_) {
-        vk::enumerate(layer, exts);
+        enumerate(layer, exts);
         for (const auto &ext : exts)
             ext_names.insert(ext.extensionName);
     }
@@ -140,7 +159,7 @@ bool Shell::has_all_device_extensions(VkPhysicalDevice phy) const
 {
     // enumerate device extensions
     std::vector<VkExtensionProperties> exts;
-    vk::enumerate(phy, nullptr, exts);
+    enumerate(phy, nullptr, exts);
 
     std::set<std::string> ext_names;
     for (const auto &ext : exts)
@@ -163,8 +182,8 @@ void Shell::init_instance()
     VkApplicationInfo app_info = {};
     app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     app_info.pApplicationName = settings_.name.c_str();
-    app_info.applicationVersion = 0;
-    app_info.apiVersion = VK_API_VERSION_1_0;
+    app_info.applicationVersion = VK_MAKE_VERSION (0,0,1);
+    app_info.apiVersion = VK_MAKE_VERSION (1,0,2);
 
     VkInstanceCreateInfo instance_info = {};
     instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -174,7 +193,7 @@ void Shell::init_instance()
     instance_info.enabledExtensionCount = static_cast<uint32_t>(instance_extensions_.size());
     instance_info.ppEnabledExtensionNames = instance_extensions_.data();
 
-    vk::assert_success(vk::CreateInstance(&instance_info, nullptr, &ctx_.instance));
+    assert_success(vkCreateInstance(&instance_info, nullptr, &ctx_.instance));
 }
 
 void Shell::init_debug_report()
@@ -195,16 +214,22 @@ void Shell::init_debug_report()
 
     debug_report_info.pfnCallback = debug_report_callback;
     debug_report_info.pUserData = reinterpret_cast<void *>(this);
-
-    vk::assert_success(vk::CreateDebugReportCallbackEXT(ctx_.instance,
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+    int k =(CreateDebugReportCallbackEXT(ctx_.instance,
                 &debug_report_info, nullptr, &ctx_.debug_report));
+    if (k<0)
+    {
+        std::cerr << "Failed to Create DebugReportCallBack Extension\n";
+        std::exit(-1);
+    }
+////////////////////////////////////////////////////////////////////////////////////////////////////////
 }
 
 void Shell::init_physical_dev()
 {
     // enumerate physical devices
     std::vector<VkPhysicalDevice> phys;
-    vk::assert_success(vk::enumerate(ctx_.instance, phys));
+    assert_success(enumerate(ctx_.instance, phys));
 
     ctx_.physical_dev = VK_NULL_HANDLE;
     for (auto phy : phys) {
@@ -213,7 +238,7 @@ void Shell::init_physical_dev()
 
         // get queue properties
         std::vector<VkQueueFamilyProperties> queues;
-        vk::get(phy, queues);
+        get(phy, queues);
 
         int game_queue_family = -1, present_queue_family = -1;
         for (uint32_t i = 0; i < queues.size(); i++) {
@@ -248,17 +273,17 @@ void Shell::init_physical_dev()
 void Shell::create_context()
 {
     create_dev();
-    vk::init_dispatch_table_bottom(ctx_.instance, ctx_.dev);
+    //init_dispatch_table_bottom(ctx_.instance, ctx_.dev);
 
-    vk::GetDeviceQueue(ctx_.dev, ctx_.game_queue_family, 0, &ctx_.game_queue);
-    vk::GetDeviceQueue(ctx_.dev, ctx_.present_queue_family, 0, &ctx_.present_queue);
+    vkGetDeviceQueue(ctx_.dev, ctx_.game_queue_family, 0, &ctx_.game_queue);
+    vkGetDeviceQueue(ctx_.dev, ctx_.present_queue_family, 0, &ctx_.present_queue);
 
     create_back_buffers();
 
     // initialize ctx_.{surface,format} before attach_shell
     create_swapchain();
 
-    game_.attach_shell(*this);
+    application_.attach_shell(*this);
 }
 
 void Shell::destroy_context()
@@ -266,19 +291,19 @@ void Shell::destroy_context()
     if (ctx_.dev == VK_NULL_HANDLE)
         return;
 
-    vk::DeviceWaitIdle(ctx_.dev);
+    vkDeviceWaitIdle(ctx_.dev);
 
     destroy_swapchain();
 
-    game_.detach_shell();
+    application_.detach_shell();
 
     destroy_back_buffers();
 
     ctx_.game_queue = VK_NULL_HANDLE;
     ctx_.present_queue = VK_NULL_HANDLE;
 
-    vk::DeviceWaitIdle(ctx_.dev);
-    vk::DestroyDevice(ctx_.dev, nullptr);
+    vkDeviceWaitIdle(ctx_.dev);
+    vkDestroyDevice(ctx_.dev, nullptr);
     ctx_.dev = VK_NULL_HANDLE;
 }
 
@@ -313,7 +338,7 @@ void Shell::create_dev()
     VkPhysicalDeviceFeatures features = {};
     dev_info.pEnabledFeatures = &features;
 
-    vk::assert_success(vk::CreateDevice(ctx_.physical_dev, &dev_info, nullptr, &ctx_.dev));
+    assert_success(vkCreateDevice(ctx_.physical_dev, &dev_info, nullptr, &ctx_.dev));
 }
 
 void Shell::create_back_buffers()
@@ -332,9 +357,9 @@ void Shell::create_back_buffers()
     const int count = settings_.back_buffer_count + 1;
     for (int i = 0; i < count; i++) {
         BackBuffer buf = {};
-        vk::assert_success(vk::CreateSemaphore(ctx_.dev, &sem_info, nullptr, &buf.acquire_semaphore));
-        vk::assert_success(vk::CreateSemaphore(ctx_.dev, &sem_info, nullptr, &buf.render_semaphore));
-        vk::assert_success(vk::CreateFence(ctx_.dev, &fence_info, nullptr, &buf.present_fence));
+        assert_success(vkCreateSemaphore(ctx_.dev, &sem_info, nullptr, &buf.acquire_semaphore));
+        assert_success(vkCreateSemaphore(ctx_.dev, &sem_info, nullptr, &buf.render_semaphore));
+        assert_success(vkCreateFence(ctx_.dev, &fence_info, nullptr, &buf.present_fence));
 
         ctx_.back_buffers.push(buf);
     }
@@ -345,9 +370,9 @@ void Shell::destroy_back_buffers()
     while (!ctx_.back_buffers.empty()) {
         const auto &buf = ctx_.back_buffers.front();
 
-        vk::DestroySemaphore(ctx_.dev, buf.acquire_semaphore, nullptr);
-        vk::DestroySemaphore(ctx_.dev, buf.render_semaphore, nullptr);
-        vk::DestroyFence(ctx_.dev, buf.present_fence, nullptr);
+        vkDestroySemaphore(ctx_.dev, buf.acquire_semaphore, nullptr);
+        vkDestroySemaphore(ctx_.dev, buf.render_semaphore, nullptr);
+        vkDestroyFence(ctx_.dev, buf.present_fence, nullptr);
 
         ctx_.back_buffers.pop();
     }
@@ -358,13 +383,13 @@ void Shell::create_swapchain()
     ctx_.surface = create_surface(ctx_.instance);
 
     VkBool32 supported;
-    vk::assert_success(vk::GetPhysicalDeviceSurfaceSupportKHR(ctx_.physical_dev,
+    assert_success(vkGetPhysicalDeviceSurfaceSupportKHR(ctx_.physical_dev,
                 ctx_.present_queue_family, ctx_.surface, &supported));
     // this should be guaranteed by the platform-specific can_present call
     assert(supported);
 
     std::vector<VkSurfaceFormatKHR> formats;
-    vk::get(ctx_.physical_dev, ctx_.surface, formats);
+    get(ctx_.physical_dev, ctx_.surface, formats);
     ctx_.format = formats[0];
 
     // defer to resize_swapchain()
@@ -376,20 +401,20 @@ void Shell::create_swapchain()
 void Shell::destroy_swapchain()
 {
     if (ctx_.swapchain != VK_NULL_HANDLE) {
-        game_.detach_swapchain();
+        application_.detach_swapchain();
 
-        vk::DestroySwapchainKHR(ctx_.dev, ctx_.swapchain, nullptr);
+        vkDestroySwapchainKHR(ctx_.dev, ctx_.swapchain, nullptr);
         ctx_.swapchain = VK_NULL_HANDLE;
     }
 
-    vk::DestroySurfaceKHR(ctx_.instance, ctx_.surface, nullptr);
+    vkDestroySurfaceKHR(ctx_.instance, ctx_.surface, nullptr);
     ctx_.surface = VK_NULL_HANDLE;
 }
 
 void Shell::resize_swapchain(uint32_t width_hint, uint32_t height_hint)
 {
     VkSurfaceCapabilitiesKHR caps;
-    vk::assert_success(vk::GetPhysicalDeviceSurfaceCapabilitiesKHR(ctx_.physical_dev,
+    assert_success(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx_.physical_dev,
                 ctx_.surface, &caps));
 
     VkExtent2D extent = caps.currentExtent;
@@ -427,7 +452,7 @@ void Shell::resize_swapchain(uint32_t width_hint, uint32_t height_hint)
         VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR : VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 
     std::vector<VkPresentModeKHR> modes;
-    vk::get(ctx_.physical_dev, ctx_.surface, modes);
+    get(ctx_.physical_dev, ctx_.surface, modes);
 
     // FIFO is the only mode universally supported
     VkPresentModeKHR mode = VK_PRESENT_MODE_FIFO_KHR;
@@ -466,30 +491,30 @@ void Shell::resize_swapchain(uint32_t width_hint, uint32_t height_hint)
     swapchain_info.clipped = true;
     swapchain_info.oldSwapchain = ctx_.swapchain;
 
-    vk::assert_success(vk::CreateSwapchainKHR(ctx_.dev, &swapchain_info, nullptr, &ctx_.swapchain));
+    assert_success(vkCreateSwapchainKHR(ctx_.dev, &swapchain_info, nullptr, &ctx_.swapchain));
     ctx_.extent = extent;
 
     // destroy the old swapchain
     if (swapchain_info.oldSwapchain != VK_NULL_HANDLE) {
-        vk::DeviceWaitIdle(ctx_.dev);
+        vkDeviceWaitIdle(ctx_.dev);
 
-        game_.detach_swapchain();
-        vk::DestroySwapchainKHR(ctx_.dev, swapchain_info.oldSwapchain, nullptr);
+        application_.detach_swapchain();
+        vkDestroySwapchainKHR(ctx_.dev, swapchain_info.oldSwapchain, nullptr);
     }
 
-    game_.attach_swapchain();
+    application_.attach_swapchain();
 }
 
-void Shell::add_game_time(float time)
+void Shell::add_app_time(float time)
 {
     int max_ticks = 3;
 
     if (!settings_.no_tick)
-        game_time_ += time;
+        app_time_ += time;
 
-    while (game_time_ >= game_tick_ && max_ticks--) {
-        game_.on_tick();
-        game_time_ -= game_tick_;
+    while (app_time_ >= app_tick_ && max_ticks--) {
+        application_.on_tick();
+        app_time_ -= app_tick_;
     }
 }
 
@@ -503,12 +528,12 @@ void Shell::acquire_back_buffer()
     auto &buf = ctx_.back_buffers.front();
 
     // wait until acquire and render semaphores are waited/unsignaled
-    vk::assert_success(vk::WaitForFences(ctx_.dev, 1, &buf.present_fence,
+    assert_success(vkWaitForFences(ctx_.dev, 1, &buf.present_fence,
                 true, UINT64_MAX));
     // reset the fence
-    vk::assert_success(vk::ResetFences(ctx_.dev, 1, &buf.present_fence));
+    assert_success(vkResetFences(ctx_.dev, 1, &buf.present_fence));
 
-    vk::assert_success(vk::AcquireNextImageKHR(ctx_.dev, ctx_.swapchain,
+    assert_success(vkAcquireNextImageKHR(ctx_.dev, ctx_.swapchain,
                 UINT64_MAX, buf.acquire_semaphore, VK_NULL_HANDLE,
                 &buf.image_index));
 
@@ -521,7 +546,7 @@ void Shell::present_back_buffer()
     const auto &buf = ctx_.acquired_back_buffer;
 
     if (!settings_.no_render)
-        game_.on_frame(game_time_ / game_tick_);
+        application_.on_frame(app_time_ / app_tick_);
 
     if (settings_.no_present) {
         fake_present();
@@ -537,9 +562,9 @@ void Shell::present_back_buffer()
     present_info.pSwapchains = &ctx_.swapchain;
     present_info.pImageIndices = &buf.image_index;
 
-    vk::assert_success(vk::QueuePresentKHR(ctx_.present_queue, &present_info));
+    assert_success(vkQueuePresentKHR(ctx_.present_queue, &present_info));
 
-    vk::assert_success(vk::QueueSubmit(ctx_.present_queue, 0, nullptr, buf.present_fence));
+    assert_success(vkQueueSubmit(ctx_.present_queue, 0, nullptr, buf.present_fence));
     ctx_.back_buffers.push(buf);
 }
 
@@ -559,7 +584,7 @@ void Shell::fake_present()
         submit_info.pWaitDstStageMask = &stage;
         submit_info.signalSemaphoreCount = 1;
         submit_info.pSignalSemaphores = &buf.acquire_semaphore;
-        vk::assert_success(vk::QueueSubmit(ctx_.game_queue, 1, &submit_info, VK_NULL_HANDLE));
+        assert_success(vkQueueSubmit(ctx_.game_queue, 1, &submit_info, VK_NULL_HANDLE));
     }
 
     // push the buffer back just once for Shell::cleanup_vk

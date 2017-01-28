@@ -1,27 +1,13 @@
-/*
- * Copyright (C) 2016 Google, Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
 
 #include <cassert>
 #include <sstream>
-#include <dlfcn.h>
+//#include <dlfcn.h>
 #include <time.h>
-
+#include <build_options.h>
 #include "Helpers.h"
-#include "Game.h"
+#include "vkapplication.h"
 #include "ShellXcb.h"
+#include <vulkan/vulkan.h>
 
 namespace {
 
@@ -81,7 +67,7 @@ xcb_atom_t intern_atom(xcb_connection_t *c, xcb_intern_atom_cookie_t cookie)
 
 } // namespace
 
-ShellXcb::ShellXcb(Game &game) : Shell(game)
+ShellXcb::ShellXcb(Application &app) : Shell(app)
 {
     instance_extensions_.push_back(VK_KHR_XCB_SURFACE_EXTENSION_NAME);
 
@@ -92,7 +78,7 @@ ShellXcb::ShellXcb(Game &game) : Shell(game)
 ShellXcb::~ShellXcb()
 {
     cleanup_vk();
-    dlclose(lib_handle_);
+    //dlclose(lib_handle_);
 
     xcb_disconnect(c_);
 }
@@ -153,38 +139,39 @@ void ShellXcb::create_window()
 
 PFN_vkGetInstanceProcAddr ShellXcb::load_vk()
 {
-    const char filename[] = "libvulkan.so";
-    void *handle, *symbol;
+//    const char filename[] = "libvulkan.so";
+//    void *handle, *symbol;
 
-#ifdef UNINSTALLED_LOADER
-    handle = dlopen(UNINSTALLED_LOADER, RTLD_LAZY);
-    if (!handle)
-        handle = dlopen(filename, RTLD_LAZY);
-#else
-    handle = dlopen(filename, RTLD_LAZY);
-#endif
+//#ifdef UNINSTALLED_LOADER
+//    handle = dlopen(UNINSTALLED_LOADER, RTLD_LAZY);
+//    if (!handle)
+//        handle = dlopen(filename, RTLD_LAZY);
+//#else
+//    handle = dlopen(filename, RTLD_LAZY);
+//#endif
 
-    if (handle)
-        symbol = dlsym(handle, "vkGetInstanceProcAddr");
+//    if (handle)
+//        symbol = dlsym(handle, "vkGetInstanceProcAddr");
 
-    if (!handle || !symbol) {
-        std::stringstream ss;
-        ss << "failed to load " << dlerror();
+//    if (!handle || !symbol) {
+//        std::stringstream ss;
+//        ss << "failed to load " << dlerror();
 
-        if (handle)
-            dlclose(handle);
+//        if (handle)
+//            dlclose(handle);
 
-        throw std::runtime_error(ss.str());
-    }
+//        throw std::runtime_error(ss.str());
+//    }
 
-    lib_handle_ = handle;
+//    lib_handle_ = handle;
 
-    return reinterpret_cast<PFN_vkGetInstanceProcAddr>(symbol);
+//    return reinterpret_cast<PFN_vkGetInstanceProcAddr>(symbol);
+    return nullptr;
 }
 
 bool ShellXcb::can_present(VkPhysicalDevice phy, uint32_t queue_family)
 {
-    return vk::GetPhysicalDeviceXcbPresentationSupportKHR(phy,
+    return vkGetPhysicalDeviceXcbPresentationSupportKHR(phy,
             queue_family, c_, scr_->root_visual);
 }
 
@@ -196,7 +183,7 @@ VkSurfaceKHR ShellXcb::create_surface(VkInstance instance)
     surface_info.window = win_;
 
     VkSurfaceKHR surface;
-    vk::assert_success(vk::CreateXcbSurfaceKHR(instance, &surface_info, nullptr, &surface));
+    assert_success(vkCreateXcbSurfaceKHR(instance, &surface_info, nullptr, &surface));
 
     return surface;
 }
@@ -215,31 +202,31 @@ void ShellXcb::handle_event(const xcb_generic_event_t *ev)
         {
             const xcb_key_press_event_t *press =
                 reinterpret_cast<const xcb_key_press_event_t *>(ev);
-            Game::Key key;
+            Application::Key key;
 
             // TODO translate xcb_keycode_t
             switch (press->detail) {
             case 9:
-                key = Game::KEY_ESC;
+                key = Application::KEY_ESC;
                 break;
             case 111:
-                key = Game::KEY_UP;
+                key = Application::KEY_UP;
                 break;
             case 116:
-                key = Game::KEY_DOWN;
+                key = Application::KEY_DOWN;
                 break;
             case 65:
-                key = Game::KEY_SPACE;
+                key = Application::KEY_SPACE;
                 break;
             case 41:
-                key = Game::KEY_F;
+                key = Application::KEY_F;
                 break;
             default:
-                key = Game::KEY_UNKNOWN;
+                key = Application::KEY_UNKNOWN;
                 break;
             }
 
-            game_.on_key(key);
+            application_.on_key(key);
         }
         break;
     case XCB_CLIENT_MESSAGE:
@@ -247,7 +234,7 @@ void ShellXcb::handle_event(const xcb_generic_event_t *ev)
             const xcb_client_message_event_t *msg =
                 reinterpret_cast<const xcb_client_message_event_t *>(ev);
             if (msg->type == wm_protocols_ && msg->data.data32[0] == wm_delete_window_)
-                game_.on_key(Game::KEY_SHUTDOWN);
+                application_.on_key(Application::KEY_SHUTDOWN);
         }
         break;
     default:
@@ -298,7 +285,7 @@ void ShellXcb::loop_poll()
         acquire_back_buffer();
 
         double t = timer.get();
-        add_game_time(static_cast<float>(t - current_time));
+        add_app_time(static_cast<float>(t - current_time));
 
         present_back_buffer();
 
@@ -321,9 +308,9 @@ void ShellXcb::loop_poll()
 
 void ShellXcb::run()
 {
-    create_window();
-    xcb_map_window(c_, win_);
-    xcb_flush(c_);
+    create_window();                            // create_windows LR();
+    xcb_map_window(c_, win_);                   // map_window LR()
+    xcb_flush(c_);                              // LR 따로
 
     create_context();
     resize_swapchain(settings_.initial_width, settings_.initial_height);
